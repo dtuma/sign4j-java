@@ -62,13 +62,13 @@ import java.io.InputStream;
  */
 public class Sign4j {
 
+    public static final String SIGN4J_VERSION = "4.0 (Java)";
+
 
     public static void main(String[] args) {
         // create a sign4j task and run it
         Sign4j sign4j = new Sign4j(args);
         try {
-            sign4j.setVerbose(Boolean.getBoolean("verbose"));
-            sign4j.setBackupOriginal(Boolean.getBoolean("backupOriginal"));
             sign4j.execute();
 
         } catch (Failure f) {
@@ -130,6 +130,7 @@ public class Sign4j {
 
     private void executeImpl() {
         // get the name of the file to process
+        parseCommandLineOptions();
         String targetFilename = findExe();
         try {
             targetFile = new File(targetFilename).getCanonicalFile();
@@ -185,6 +186,28 @@ public class Sign4j {
     }
 
 
+    private void parseCommandLineOptions() {
+        // scan the first few arguments looking for sign4j options
+        int i;
+        for (i = 0; i < cmdLine.length; i++) {
+            String arg = cmdLine[i];
+            if (!arg.startsWith("-"))
+                break;
+            else if (arg.equals("--backup"))
+                setBackupOriginal(true);
+            else if (arg.equals("--verbose"))
+                setVerbose(true);
+        }
+
+        // if any sign4j options were found and processed, remove them from
+        // the beginning of the command line
+        if (i > 0) {
+            String[] signingCmd = new String[cmdLine.length - i];
+            System.arraycopy(cmdLine, i, signingCmd, 0, signingCmd.length);
+            cmdLine = signingCmd;
+        }
+    }
+
     private String findExe() {
         for (int i = cmdLine.length; i-- > 1;) {
             String arg = cmdLine[i];
@@ -195,7 +218,7 @@ public class Sign4j {
                 return file;
             }
         }
-        throw new Failure("Could not find .exe in command line to process");
+        throw new Failure(usage());
     }
 
 
@@ -382,6 +405,19 @@ public class Sign4j {
         public Failure(String m, Throwable t) {
             super(m, t);
         }
+    }
+
+    private static final String usage() {
+        return String.join(System.lineSeparator(),
+            "This is sign4j version " + SIGN4J_VERSION, "", //
+            "Usage: sign4j [options] <arguments>", //
+            "", //
+            "  [options] may include:",
+            "    --backup       retain a backup of the original file before signing",
+            "    --verbose      show diagnostics about intermediary steps of the process",
+            "", //
+            "  <arguments> must specify verbatim the command line for your signing tool.",
+            "              Only one file can be signed on each invocation");
     }
 
 
