@@ -29,6 +29,13 @@
         <plugin>
           <artifactId>maven-jar-plugin</artifactId>
           <version>3.4.2</version>
+          <configuration>
+            <archive>
+              <manifest>
+                <mainClass>com.tuma_solutions.sign4j.Sign4j</mainClass>
+              </manifest>
+            </archive>
+          </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
