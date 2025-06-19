@@ -84,6 +84,8 @@ public class Sign4j {
 
     private String[] cmdLine;
 
+    private int maxSignaturePasses;
+
     private boolean verbose;
 
     private boolean backupOriginal;
@@ -101,6 +103,23 @@ public class Sign4j {
 
     public Sign4j(String[] cmdLine) {
         this.cmdLine = cmdLine;
+        this.maxSignaturePasses = 10;
+    }
+
+    public int getMaxSignaturePasses() {
+        return maxSignaturePasses;
+    }
+
+    public void setMaxSignaturePasses(int maxSignaturePasses) {
+        this.maxSignaturePasses = Math.max(2, maxSignaturePasses);
+    }
+
+    public void setMaxSignaturePasses(String maxSignaturePasses) {
+        try {
+            setMaxSignaturePasses(Integer.parseInt(maxSignaturePasses));
+        } catch (NumberFormatException nfe) {
+            throw new Failure(usage());
+        }
     }
 
     public boolean isVerbose() {
@@ -164,10 +183,13 @@ public class Sign4j {
         // repeatedly sign the file, tweaking the size of the terminal ZIP
         // comment, until the signature size exactly matches the tweak we wrote
         int signatureSize = 0;
+        int passCount = 0;
         while (true) {
-            System.out.println(signatureSize == 0 //
-                    ? "Signing file " + targetFile //
-                    : "    Resigning with signature size " + signatureSize);
+            if (passCount == 0)
+                System.out.println("Signing file " + targetFile);
+            else if (verbose)
+                System.out.println("Re-signing with signature size " //
+                        + signatureSize);
 
             copyFile(backupFile, targetFile, signatureSize);
 
@@ -178,6 +200,10 @@ public class Sign4j {
                 break;
             else
                 signatureSize = (int) thisSigSize;
+
+            if (++passCount == maxSignaturePasses)
+                throw new Failure("No consistent signature size seen after "
+                        + maxSignaturePasses + " passes");
         }
 
         // delete the backup file after successful signing
@@ -193,6 +219,8 @@ public class Sign4j {
             String arg = cmdLine[i];
             if (!arg.startsWith("-"))
                 break;
+            else if (arg.equals("--maxpasses") && i < cmdLine.length - 1)
+                setMaxSignaturePasses(cmdLine[++i]);
             else if (arg.equals("--backup"))
                 setBackupOriginal(true);
             else if (arg.equals("--verbose"))
@@ -413,6 +441,8 @@ public class Sign4j {
             "Usage: sign4j [options] <arguments>", //
             "", //
             "  [options] may include:",
+            "    --maxpasses N  abort if the file cannot be signed after N attempts",
+            "                   (default is 10)",
             "    --backup       retain a backup of the original file before signing",
             "    --verbose      show diagnostics about intermediary steps of the process",
             "", //
