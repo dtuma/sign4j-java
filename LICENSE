@@ -1,6 +1,6 @@
-BSD 3-Clause License
+sign4j-java - a Java utility to sign executables created by Launch4j
 
-Copyright (c) 2025, David Tuma
+Copyright (c) 2025, David Tuma, Tuma Solutions, LLC
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
