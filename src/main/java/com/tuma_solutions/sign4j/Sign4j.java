@@ -40,6 +40,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 
 
 /**
@@ -84,6 +85,8 @@ public class Sign4j {
 
     private String[] cmdLine;
 
+    private boolean inPlace;
+
     private boolean lenient;
 
     private int maxSignaturePasses;
@@ -91,6 +94,8 @@ public class Sign4j {
     private boolean verbose;
 
     private boolean backupOriginal;
+
+    private File inputFile;
 
     private File targetFile;
 
@@ -100,12 +105,18 @@ public class Sign4j {
 
     private long commentSizeOffset;
 
-    private File backupFile;
-
 
     public Sign4j(String[] cmdLine) {
         this.cmdLine = cmdLine;
         this.maxSignaturePasses = 10;
+    }
+
+    public boolean isInPlace() {
+        return inPlace;
+    }
+
+    public void setInPlace(boolean inPlace) {
+        this.inPlace = inPlace;
     }
 
     public boolean isLenient() {
@@ -160,34 +171,22 @@ public class Sign4j {
     private void executeImpl() {
         // get the name of the file to process
         parseCommandLineOptions();
-        String targetFilename = findExe();
-        try {
-            targetFile = new File(targetFilename).getCanonicalFile();
-        } catch (IOException ioe) {
-            targetFile = new File(targetFilename);
-        }
-        originalFileSize = targetFile.length();
-        if (!targetFile.isFile() || originalFileSize == 0)
-            throw new Failure("File does not exist: " + targetFile);
-
-        // identify a file to use for temp/backup purposes
-        backupFile = getBackupFile();
-        if (backupFile.exists() && !backupFile.delete())
-            throw new Failure("Couldn't delete backup file " + backupFile);
+        originalFileSize = inputFile.length();
+        if (!inputFile.isFile() || originalFileSize == 0)
+            throw new Failure("File does not exist: " + inputFile);
 
         // find the zip header and read the initial size of the zip comment
         boolean isZip = findZipHeaderMetadata();
-        if (!isZip) {
-            System.out.println("Signing file " + targetFile);
-            if (backupOriginal)
-                copyFile(targetFile, backupFile, 0);
-            signFile();
-            return;
-        }
 
-        // keep a copy of the original file before modifications
-        if (!targetFile.renameTo(backupFile))
-            throw new Failure("Couldn't move file " + targetFile);
+        // identify a file to use for temp/backup purposes
+        File cleanFile = null;
+        if (isZip && !inPlace && inputFile.equals(targetFile)) {
+            // if not signing in place, backup the input for repeated signing
+            cleanFile = backupInputFile();
+        } else if (backupOriginal) {
+            // backup the input file if requested by configuration
+            backupInputFile();
+        }
 
         // repeatedly sign the file, tweaking the size of the terminal ZIP
         // comment, until the signature size exactly matches the tweak we wrote
@@ -200,12 +199,16 @@ public class Sign4j {
                 System.out.println("Re-signing with signature size " //
                         + signatureSize);
 
-            copyFile(backupFile, targetFile, signatureSize);
+            if (passCount > 0) {
+                if (cleanFile != null)
+                    copyFile(cleanFile, inputFile);
+                writeNewSignatureSize(inputFile, signatureSize);
+            }
 
             signFile();
 
             long thisSigSize = targetFile.length() - originalFileSize;
-            if (thisSigSize == signatureSize)
+            if (thisSigSize == signatureSize || !isZip)
                 break;
             else
                 signatureSize = (int) thisSigSize;
@@ -214,10 +217,6 @@ public class Sign4j {
                 throw new Failure("No consistent signature size seen after "
                         + maxSignaturePasses + " passes");
         }
-
-        // delete the backup file after successful signing
-        if (!backupOriginal)
-            backupFile.delete();
     }
 
 
@@ -228,6 +227,8 @@ public class Sign4j {
             String arg = cmdLine[i];
             if (!arg.startsWith("-"))
                 break;
+            else if (arg.equals("--onthespot"))
+                setInPlace(true);
             else if (arg.equals("--lenient"))
                 setLenient(true);
             else if (arg.equals("--maxpasses") && i < cmdLine.length - 1)
@@ -245,28 +246,56 @@ public class Sign4j {
             System.arraycopy(cmdLine, i, signingCmd, 0, signingCmd.length);
             cmdLine = signingCmd;
         }
-    }
 
-    private String findExe() {
-        for (int i = cmdLine.length; i-- > 1;) {
+        // scan the rest of the arguments to find the filenames to process
+        File sawFile = null;
+        for (i = 1; i < cmdLine.length; i++) {
             String arg = cmdLine[i];
-            if (arg.toLowerCase().endsWith(".exe")) {
-                String file = arg;
-                file = file.replace('/', File.separatorChar);
-                file = file.replace('\\', File.separatorChar);
-                return file;
+            if (arg.equals("-in") && i < cmdLine.length - 1) {
+                inputFile = sawFile = getFileArg(cmdLine[++i]);
+            } else if ("-out".equals(arg) && i < cmdLine.length - 1) {
+                targetFile = sawFile = getFileArg(cmdLine[++i]);
+            } else if (arg.startsWith("-")
+                    || (arg.startsWith("/") && arg.length() < 5)) {
+                if (sawFile == null)
+                    inputFile = targetFile = null;
+            } else if (sawFile == null && arg.toLowerCase().endsWith(".exe")) {
+                inputFile = targetFile = getFileArg(arg);
             }
         }
-        throw new Failure(usage());
+
+        // ensure files were found
+        if (inputFile == null || targetFile == null)
+            throw new Failure(usage());
+    }
+
+    private File getFileArg(String arg) {
+        arg = arg.replace('/', File.separatorChar);
+        arg = arg.replace('\\', File.separatorChar);
+        File file = new File(arg);
+        try {
+            file = file.getCanonicalFile();
+        } catch (IOException ioe) {
+        }
+        return file;
     }
 
 
-    private File getBackupFile() {
+    private File backupInputFile() {
         // add "-presign" to the end of the filename (before the extension)
-        String filename = targetFile.getName();
+        String filename = inputFile.getName();
         String backupName = filename.substring(0, filename.length() - 4)
                 + "-presign.exe";
-        return new File(targetFile.getParentFile(), backupName);
+        File backupFile = new File(inputFile.getParentFile(), backupName);
+
+        // copy the input file to the backup
+        if (backupFile.exists() && !backupFile.delete())
+            throw new Failure("Couldn't delete backup file " + backupFile);
+        copyFile(inputFile, backupFile);
+        if (!backupOriginal)
+            backupFile.deleteOnExit();
+
+        return backupFile;
     }
 
 
@@ -280,7 +309,7 @@ public class Sign4j {
             byte[] buffer = new byte[bufLen];
 
             // open the file and read the final portion into the buffer
-            in = new FileInputStream(targetFile);
+            in = new FileInputStream(inputFile);
             in.getChannel().position(bufOffset);
             if (in.read(buffer) != bufLen)
                 throw new IOException("Problem reading ZIP end buffer");
@@ -330,7 +359,7 @@ public class Sign4j {
             return false;
 
         } catch (IOException ioe) {
-            throw new Failure("Unable to read file " + targetFile, ioe);
+            throw new Failure("Unable to read file " + inputFile, ioe);
         } finally {
             safelyClose(in);
         }
@@ -347,7 +376,7 @@ public class Sign4j {
 
     private byte[] copyBuffer;
 
-    private void copyFile(File src, File dest, int signatureSize) {
+    private void copyFile(File src, File dest) {
         FileInputStream in = null;
         FileOutputStream out = null;
         try {
@@ -361,19 +390,29 @@ public class Sign4j {
             while ((bytesRead = in.read(copyBuffer)) != -1)
                 out.write(copyBuffer, 0, bytesRead);
 
-            if (signatureSize > 0) {
-                int newCommentSize = signatureSize + originalCommentSize;
-                out.getChannel().position(commentSizeOffset);
-                out.write(newCommentSize & 0xFF);
-                out.write((newCommentSize >> 8) & 0xFF);
-            }
-
         } catch (Exception ioe) {
             throw new Failure("Unable to write data to " + dest, ioe);
 
         } finally {
             safelyClose(in);
             safelyClose(out);
+        }
+    }
+
+    private void writeNewSignatureSize(File file, int signatureSize) {
+        RandomAccessFile raf = null;
+        try {
+            raf = new RandomAccessFile(file, "rw");
+            raf.seek(commentSizeOffset);
+
+            int newCommentSize = signatureSize + originalCommentSize;
+            raf.write(newCommentSize & 0xFF);
+            raf.write((newCommentSize >> 8) & 0xFF);
+
+        } catch (Exception ioe) {
+            throw new Failure("Unable to write signature size to " + file);
+        } finally {
+            safelyClose(raf);
         }
     }
 
@@ -479,6 +518,8 @@ public class Sign4j {
             "Usage: sign4j [options] <arguments>", //
             "", //
             "  [options] may include:",
+            "    --onthespot    avoid the creation of a temporary file (your tool must be",
+            "                   able to sign twice)", //
             "    --lenient      overlook ZIP header errors in the input file (for example,",
             "                   if an unsuccesful attempt has already been made to sign",
             "                   the file in the past)", //
