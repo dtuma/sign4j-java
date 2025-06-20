@@ -97,6 +97,8 @@ public class Sign4j {
 
     private File inputFile;
 
+    private int inputFilePos;
+
     private File targetFile;
 
     private long originalFileSize;
@@ -183,6 +185,13 @@ public class Sign4j {
         if (isZip && !inPlace && inputFile.equals(targetFile)) {
             // if not signing in place, backup the input for repeated signing
             cleanFile = backupInputFile();
+        } else if (isZip && inputFilePos > 0 && !inputFile.equals(targetFile)) {
+            // if -in and -out were different files, backup the input file and
+            // work against the backup so the input file remains unmodified
+            backupOriginal = false;
+            cleanFile = inputFile;
+            inputFile = backupInputFile();
+            cmdLine[inputFilePos] = inputFile.getPath();
         } else if (backupOriginal) {
             // backup the input file if requested by configuration
             backupInputFile();
@@ -252,7 +261,7 @@ public class Sign4j {
         for (i = 1; i < cmdLine.length; i++) {
             String arg = cmdLine[i];
             if (arg.equals("-in") && i < cmdLine.length - 1) {
-                inputFile = sawFile = getFileArg(cmdLine[++i]);
+                inputFile = sawFile = getFileArg(cmdLine[inputFilePos = ++i]);
             } else if ("-out".equals(arg) && i < cmdLine.length - 1) {
                 targetFile = sawFile = getFileArg(cmdLine[++i]);
             } else if (arg.startsWith("-")
