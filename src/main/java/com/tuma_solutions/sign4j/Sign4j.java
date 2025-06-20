@@ -84,6 +84,8 @@ public class Sign4j {
 
     private String[] cmdLine;
 
+    private boolean lenient;
+
     private int maxSignaturePasses;
 
     private boolean verbose;
@@ -104,6 +106,14 @@ public class Sign4j {
     public Sign4j(String[] cmdLine) {
         this.cmdLine = cmdLine;
         this.maxSignaturePasses = 10;
+    }
+
+    public boolean isLenient() {
+        return lenient;
+    }
+
+    public void setLenient(boolean lenient) {
+        this.lenient = lenient;
     }
 
     public int getMaxSignaturePasses() {
@@ -168,7 +178,6 @@ public class Sign4j {
         // find the zip header and read the initial size of the zip comment
         boolean isZip = findZipHeaderMetadata();
         if (!isZip) {
-            System.out.println("You don't need sign4j to sign this file");
             System.out.println("Signing file " + targetFile);
             if (backupOriginal)
                 copyFile(targetFile, backupFile, 0);
@@ -219,6 +228,8 @@ public class Sign4j {
             String arg = cmdLine[i];
             if (!arg.startsWith("-"))
                 break;
+            else if (arg.equals("--lenient"))
+                setLenient(true);
             else if (arg.equals("--maxpasses") && i < cmdLine.length - 1)
                 setMaxSignaturePasses(cmdLine[++i]);
             else if (arg.equals("--backup"))
@@ -275,20 +286,47 @@ public class Sign4j {
                 throw new IOException("Problem reading ZIP end buffer");
 
             // scan the buffer, looking for the ZIP end header
+            boolean sawBadSize = false;
             for (int pos = bufLen - END_HEADER_SIZE; pos >= 0; pos--) {
                 if (isZipEndHeaderStart(buffer, pos)) {
                     int headerEnd = pos + END_HEADER_SIZE;
                     int sizePos = headerEnd - 2;
-                    originalCommentSize = ((buffer[sizePos] & 0xFF)
-                            | ((buffer[sizePos + 1] << 8) & 0xFF00));
-                    if (headerEnd + originalCommentSize == bufLen) {
-                        commentSizeOffset = sizePos + bufOffset;
+                    commentSizeOffset = sizePos + bufOffset;
+
+                    if (lenient) {
+                        // in lenient mode, overlook errors in the original ZIP
+                        // comment size. For example, if the file was previously
+                        // signed (unsuccessfully) using "in place" mode, the
+                        // comment size in the ZIP header might be wrong.
+                        // Lenient mode ignores the size in the ZIP header and
+                        // computes a new effective value from the file size.
+                        originalCommentSize = bufLen - headerEnd;
                         return true;
+
+                    } else {
+                        // when lenient mode is off, double-check the ZIP
+                        // comment size. If it's wrong, consider this file not
+                        // to be a ZIP at all, and proceed without sign4j logic.
+                        originalCommentSize = ((buffer[sizePos] & 0xFF)
+                                | ((buffer[sizePos + 1] << 8) & 0xFF00));
+                        if (headerEnd + originalCommentSize == bufLen)
+                            return true;
+                        else
+                            sawBadSize = true;
                     }
                 }
             }
 
-            // no ZIP header was found
+            // if we found a ZIP header with an incorrect size, print a warning
+            if (sawBadSize) {
+                System.err.println("WARNING: Size mismatch in ZIP header; proceeding without sign4j logic.");
+                System.err.println("    Create a clean file to sign, or re-run with lenient option.");
+            } else {
+                // if no ZIP header was found, print an informational message
+                System.out.println("You don't need sign4j to sign this file");
+            }
+
+            // no valid ZIP header was found
             return false;
 
         } catch (IOException ioe) {
@@ -441,6 +479,9 @@ public class Sign4j {
             "Usage: sign4j [options] <arguments>", //
             "", //
             "  [options] may include:",
+            "    --lenient      overlook ZIP header errors in the input file (for example,",
+            "                   if an unsuccesful attempt has already been made to sign",
+            "                   the file in the past)", //
             "    --maxpasses N  abort if the file cannot be signed after N attempts",
             "                   (default is 10)",
             "    --backup       retain a backup of the original file before signing",
