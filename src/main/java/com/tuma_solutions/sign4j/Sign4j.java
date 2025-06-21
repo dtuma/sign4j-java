@@ -85,6 +85,8 @@ public class Sign4j {
 
     private String[] cmdLine;
 
+    private File baseDir;
+
     private boolean inPlace;
 
     private boolean lenient;
@@ -101,6 +103,8 @@ public class Sign4j {
 
     private File targetFile;
 
+    private File fileToDelete;
+
     private long originalFileSize;
 
     private int originalCommentSize;
@@ -111,6 +115,14 @@ public class Sign4j {
     public Sign4j(String[] cmdLine) {
         this.cmdLine = cmdLine;
         this.maxSignaturePasses = 10;
+    }
+
+    public File getBaseDir() {
+        return baseDir;
+    }
+
+    public void setBaseDir(File baseDir) {
+        this.baseDir = baseDir;
     }
 
     public boolean isInPlace() {
@@ -167,6 +179,8 @@ public class Sign4j {
             executeImpl();
         } finally {
             copyBuffer = null;
+            if (fileToDelete != null)
+                fileToDelete.delete();
         }
     }
 
@@ -283,6 +297,8 @@ public class Sign4j {
         arg = arg.replace('\\', File.separatorChar);
         File file = new File(arg);
         try {
+            if (baseDir != null && !file.isAbsolute())
+                file = new File(baseDir, arg);
             file = file.getCanonicalFile();
         } catch (IOException ioe) {
         }
@@ -302,7 +318,7 @@ public class Sign4j {
             throw new Failure("Couldn't delete backup file " + backupFile);
         copyFile(inputFile, backupFile);
         if (!backupOriginal)
-            backupFile.deleteOnExit();
+            fileToDelete = backupFile;
 
         return backupFile;
     }
@@ -428,7 +444,7 @@ public class Sign4j {
     private void signFile() {
         int exitCode;
         try {
-            Process process = Runtime.getRuntime().exec(cmdLine);
+            Process process = Runtime.getRuntime().exec(cmdLine, null, baseDir);
             exitCode = waitForProcess(process, verbose);
 
         } catch (Exception e) {

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<antlib>
+  <taskdef name="sign4j" classname="com.tuma_solutions.sign4j.Sign4jTask" />
+</antlib>
