@@ -68,8 +68,9 @@ public class Sign4j {
 
     public static void main(String[] args) {
         // create a sign4j task and run it
-        Sign4j sign4j = new Sign4j(args);
+        Sign4j sign4j = new Sign4j();
         try {
+            sign4j.setCmdLine(args);
             sign4j.execute();
 
         } catch (Failure f) {
@@ -84,6 +85,8 @@ public class Sign4j {
 
 
     private String[] cmdLine;
+
+    private Runnable signingTask;
 
     private File baseDir;
 
@@ -112,9 +115,25 @@ public class Sign4j {
     private long commentSizeOffset;
 
 
-    public Sign4j(String[] cmdLine) {
-        this.cmdLine = cmdLine;
+    public Sign4j() {
+        this.cmdLine = new String[0];
         this.maxSignaturePasses = 10;
+    }
+
+    public String[] getCmdLine() {
+        return cmdLine;
+    }
+
+    public void setCmdLine(String[] cmdLine) {
+        this.cmdLine = cmdLine;
+    }
+
+    public Runnable getSigningTask() {
+        return signingTask;
+    }
+
+    public void setSigningTask(Runnable signingTask) {
+        this.signingTask = signingTask;
     }
 
     public File getBaseDir() {
@@ -123,6 +142,14 @@ public class Sign4j {
 
     public void setBaseDir(File baseDir) {
         this.baseDir = baseDir;
+    }
+
+    public File getFile() {
+        return this.targetFile;
+    }
+
+    public void setFile(File file) {
+        this.inputFile = this.targetFile = file;
     }
 
     public boolean isInPlace() {
@@ -442,6 +469,11 @@ public class Sign4j {
     }
 
     private void signFile() {
+        if (signingTask != null) {
+            signingTask.run();
+            return;
+        }
+
         int exitCode;
         try {
             Process process = Runtime.getRuntime().exec(cmdLine, null, baseDir);

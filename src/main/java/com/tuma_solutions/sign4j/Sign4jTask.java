@@ -23,14 +23,22 @@
 
 package com.tuma_solutions.sign4j;
 
+import java.io.File;
+
 import org.apache.tools.ant.BuildException;
+import org.apache.tools.ant.RuntimeConfigurable;
 import org.apache.tools.ant.Task;
+import org.apache.tools.ant.TaskContainer;
 import org.apache.tools.ant.types.Commandline;
 
 
-public class Sign4jTask extends Task {
+public class Sign4jTask extends Task implements TaskContainer {
 
     private Commandline cmdLine;
+
+    private Task signingTask;
+
+    private File file;
 
     private boolean inPlace;
 
@@ -88,18 +96,42 @@ public class Sign4jTask extends Task {
     }
 
     @Override
+    public void addTask(Task task) {
+        if (this.signingTask == null)
+            this.signingTask = task;
+        else
+            throw new BuildException("Only one nested signing task allowed.");
+    }
+
+    public void setFile(File file) {
+        this.file = file;
+    }
+
+    @Override
     public void execute() throws BuildException {
         // validate configuration
         String[] signingCmd = cmdLine.getCommandline();
-        if (signingCmd.length < 2) {
+        if (signingTask != null) {
+            if (signingCmd.length > 0)
+                throw new BuildException("You must provide either a signing "
+                        + "command line, or a nested signing task; but not both.");
+            syncFileAttrWithSigningTask();
+
+        } else if (signingCmd.length == 0) {
             throw new BuildException("The signing operation must be "
                     + "specified; either with the 'command' attribute, "
-                    + "or with nested <arg> elements.");
+                    + "with nested <arg> elements, or with a nested "
+                    + "signing task.");
         }
 
         try {
-            Sign4j s = new Sign4j(signingCmd);
+            Sign4j s = new Sign4j();
+            if (signingCmd.length > 0)
+                s.setCmdLine(signingCmd);
+            if (signingTask != null)
+                s.setSigningTask(new SigningTaskExecutor());
             s.setBaseDir(getProject().getBaseDir());
+            s.setFile(file);
             s.setInPlace(inPlace);
             s.setLenient(lenient);
             if (maxPasses != -1)
@@ -111,6 +143,40 @@ public class Sign4jTask extends Task {
         } catch (Sign4j.Failure f) {
             throw new BuildException(f.getMessage(), f.getCause(),
                     getLocation());
+        }
+    }
+
+    private void syncFileAttrWithSigningTask() {
+        RuntimeConfigurable rc = signingTask.getRuntimeConfigurableWrapper();
+        if (file == null) {
+            // if no file attribute was provided on this task, try to read it
+            // from the signingTask
+            String childAttr = (String) rc.getAttributeMap().get("file");
+            if (childAttr == null)
+                throw new BuildException("You must provide a file argument "
+                        + "when using a nested signing task.");
+
+            // resolve placeholders and relative file paths
+            String filename = getProject().replaceProperties(childAttr);
+            file = getProject().resolveFile(filename);
+
+        } else if (signingTask.getTaskType().equals("jsign")) {
+            // if a file attribute was provided on this task, copy it down to
+            // a jsign child task. (If the child task isn't jsign, we don't
+            // know if it uses a file attribute, so we can't risk copying.)
+            rc.setAttribute("file", file.getPath());
+        }
+    }
+
+
+    private class SigningTaskExecutor implements Runnable {
+        @Override
+        public void run() {
+            // run the signing task
+            signingTask.perform();
+            // afterwards, re-register this as the active task
+            getProject().registerThreadTask(Thread.currentThread(),
+                Sign4jTask.this);
         }
     }
 
