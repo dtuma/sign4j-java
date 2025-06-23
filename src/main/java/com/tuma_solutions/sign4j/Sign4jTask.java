@@ -40,6 +40,8 @@ public class Sign4jTask extends Task implements TaskContainer {
 
     private File file;
 
+    private File inputFile;
+
     private boolean inPlace;
 
     private boolean lenient;
@@ -107,6 +109,10 @@ public class Sign4jTask extends Task implements TaskContainer {
         this.file = file;
     }
 
+    public void setInputfile(File inputFile) {
+        this.inputFile = inputFile;
+    }
+
     @Override
     public void execute() throws BuildException {
         // validate configuration
@@ -132,6 +138,8 @@ public class Sign4jTask extends Task implements TaskContainer {
                 s.setSigningTask(new SigningTaskExecutor());
             s.setBaseDir(getProject().getBaseDir());
             s.setFile(file);
+            if (inputFile != null)
+                s.setInputFile(inputFile);
             s.setInPlace(inPlace);
             s.setLenient(lenient);
             if (maxPasses != -1)

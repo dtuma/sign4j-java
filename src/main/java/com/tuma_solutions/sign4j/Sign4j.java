@@ -41,6 +41,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.util.Arrays;
 
 
 /**
@@ -142,6 +143,14 @@ public class Sign4j {
 
     public void setBaseDir(File baseDir) {
         this.baseDir = baseDir;
+    }
+
+    public File getInputFile() {
+        return inputFile;
+    }
+
+    public void setInputFile(File inputFile) {
+        this.inputFile = inputFile;
     }
 
     public File getFile() {
@@ -297,6 +306,13 @@ public class Sign4j {
             cmdLine = signingCmd;
         }
 
+        // if this object was preconfigured with input and target files, find
+        // the position of the input file arg in the command line
+        if (inputFile != null && targetFile != null) {
+            inputFilePos = findInputFileArg();
+            return;
+        }
+
         // scan the rest of the arguments to find the filenames to process
         File sawFile = null;
         for (i = 1; i < cmdLine.length; i++) {
@@ -317,6 +333,23 @@ public class Sign4j {
         // ensure files were found
         if (inputFile == null || targetFile == null)
             throw new Failure(usage());
+    }
+
+    private int findInputFileArg() {
+        // if there is a "-in" argument, trust that the input file follows it
+        int pos = Arrays.asList(cmdLine).indexOf("-in") + 1;
+        if (pos > 1 && pos < cmdLine.length)
+            return pos;
+
+        // search the command line, looking for a file with the same name
+        String filename = inputFile.getName().toLowerCase();
+        for (int i = 1; i < cmdLine.length; i++) {
+            if (cmdLine[i].toLowerCase().endsWith(filename))
+                return i;
+        }
+
+        // the input file was not found in the command line
+        return -1;
     }
 
     private File getFileArg(String arg) {
